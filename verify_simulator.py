@@ -63,7 +63,12 @@ def run_verification():
     print(f"   Successfully generated {len(tx_list)} transactions.")
 
     # Convert to Pandas DataFrame for easy analysis
-    df = pd.DataFrame([tx.to_dict() for tx in tx_list])
+    df_rows = []
+    for tx in tx_list:
+        row = tx.to_dict()
+        row["is_fraud"] = tx.is_fraud
+        df_rows.append(row)
+    df = pd.DataFrame(df_rows)
 
     # 1. Unique Transaction IDs
     unique_ids = df["transaction_id"].nunique()

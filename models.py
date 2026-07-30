@@ -74,5 +74,7 @@ class Transaction:
     is_fraud: bool
 
     def to_dict(self) -> Dict[str, Any]:
-        """Converts the Transaction object to a serializable dictionary."""
-        return asdict(self)
+        """Converts the Transaction object to a serializable dictionary, omitting internal is_fraud tag."""
+        data = asdict(self)
+        data.pop("is_fraud", None)
+        return data
