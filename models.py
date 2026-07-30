@@ -5,7 +5,7 @@ Device, Customer, Merchant, and Transaction.
 """
 
 from dataclasses import asdict, dataclass, field
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 
@@ -40,6 +40,16 @@ class Customer:
     last_transaction_timestamp: Optional[datetime] = None
     last_transaction_country: Optional[str] = None
     last_transaction_city: Optional[str] = None
+    recent_transactions: List[datetime] = field(default_factory=list)
+
+    def record_transaction(self, ts: datetime) -> int:
+        """Records a transaction timestamp and returns count of transactions in the last 10 minutes."""
+        cutoff = ts - timedelta(minutes=10)
+        self.recent_transactions = [t for t in self.recent_transactions if t >= cutoff]
+        count = len(self.recent_transactions)
+        self.recent_transactions.append(ts)
+        self.last_transaction_timestamp = ts
+        return count
 
 
 @dataclass
@@ -60,6 +70,7 @@ class Transaction:
     transaction_id: str
     timestamp: str  # ISO 8601 string
     customer_id: str
+    customer_country: str
     merchant_id: str
     merchant_name: str
     merchant_category: str
@@ -71,6 +82,8 @@ class Transaction:
     device: str
     ip_address: str
     transaction_status: str  # APPROVED, DECLINED
+    hour: int
+    transactions_last_10min: int
     is_fraud: bool
 
     def to_dict(self) -> Dict[str, Any]:

@@ -39,6 +39,43 @@ class SimulationClock:
             self.sim_start += delta
 
 
+def build_transaction(
+    customer: Customer,
+    merchant: Merchant,
+    amount: float,
+    currency: str,
+    country: str,
+    city: str,
+    payment_method: str,
+    device_type: str,
+    ip_address: str,
+    status: str,
+    is_fraud: bool,
+    timestamp: datetime,
+) -> Transaction:
+    count_10min = customer.record_transaction(timestamp)
+    return Transaction(
+        transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
+        timestamp=timestamp.isoformat(),
+        customer_id=customer.customer_id,
+        customer_country=customer.country,
+        merchant_id=merchant.merchant_id,
+        merchant_name=merchant.merchant_name,
+        merchant_category=merchant.category,
+        amount=amount,
+        currency=currency,
+        country=country,
+        city=city,
+        payment_method=payment_method,
+        device=device_type,
+        ip_address=ip_address,
+        transaction_status=status,
+        hour=timestamp.hour,
+        transactions_last_10min=count_10min,
+        is_fraud=is_fraud,
+    )
+
+
 class FraudStrategy(abc.ABC):
     """Abstract Base Class for fraud strategies (Strategy Pattern)."""
 
@@ -80,22 +117,19 @@ class HighAmountFraudStrategy(FraudStrategy):
         currency = config.get_currency_for_country(country)
         device = random.choice(customer.devices) if customer.devices else Device(str(uuid.uuid4()), "Mobile", "127.0.0.1")
 
-        tx = Transaction(
-            transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
-            timestamp=timestamp.isoformat(),
-            customer_id=customer.customer_id,
-            merchant_id=merchant.merchant_id,
-            merchant_name=merchant.merchant_name,
-            merchant_category=merchant.category,
+        tx = build_transaction(
+            customer=customer,
+            merchant=merchant,
             amount=amount,
             currency=currency,
             country=country,
             city=city,
             payment_method=customer.preferred_payment_method,
-            device=device.device_type,
+            device_type=device.device_type,
             ip_address=device.ip_address,
-            transaction_status="APPROVED",
+            status="APPROVED",
             is_fraud=True,
+            timestamp=timestamp,
         )
         return [tx]
 
@@ -125,22 +159,19 @@ class UnusualCountryFraudStrategy(FraudStrategy):
         # Keep device known but location is completely different (e.g. mobile roaming)
         device = random.choice(customer.devices) if customer.devices else Device(str(uuid.uuid4()), "Mobile", "8.8.8.8")
 
-        tx = Transaction(
-            transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
-            timestamp=timestamp.isoformat(),
-            customer_id=customer.customer_id,
-            merchant_id=merchant.merchant_id,
-            merchant_name=merchant.merchant_name,
-            merchant_category=merchant.category,
+        tx = build_transaction(
+            customer=customer,
+            merchant=merchant,
             amount=amount,
             currency=currency,
             country=country,
             city=merchant.city,
             payment_method=customer.preferred_payment_method,
-            device=device.device_type,
+            device_type=device.device_type,
             ip_address=device.ip_address,
-            transaction_status="APPROVED",
+            status="APPROVED",
             is_fraud=True,
+            timestamp=timestamp,
         )
         return [tx]
 
@@ -168,7 +199,7 @@ class ImpossibleTravelFraudStrategy(FraudStrategy):
         fraud_country = merchant.country
 
         # Create two transactions:
-        # 1. A normal transaction 5 minutes ago in the customer's last country
+        # 1. A normal transaction 10 minutes ago in the customer's last country
         # 2. A fraud transaction now in the distant country
         normal_time = timestamp - timedelta(minutes=10)
         
@@ -176,46 +207,39 @@ class ImpossibleTravelFraudStrategy(FraudStrategy):
         prev_m = random.choice(prev_merchants) if prev_merchants else random.choice(merchants)
         prev_device = random.choice(customer.devices) if customer.devices else Device(str(uuid.uuid4()), "Laptop", "192.168.1.50")
 
-        tx1 = Transaction(
-            transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
-            timestamp=normal_time.isoformat(),
-            customer_id=customer.customer_id,
-            merchant_id=prev_m.merchant_id,
-            merchant_name=prev_m.merchant_name,
-            merchant_category=prev_m.category,
+        tx1 = build_transaction(
+            customer=customer,
+            merchant=prev_m,
             amount=round(random.uniform(prev_m.min_price, prev_m.max_price * 0.4), 2),
             currency=config.get_currency_for_country(last_country),
             country=last_country,
             city=customer.city,
             payment_method=customer.preferred_payment_method,
-            device=prev_device.device_type,
+            device_type=prev_device.device_type,
             ip_address=prev_device.ip_address,
-            transaction_status="APPROVED",
+            status="APPROVED",
             is_fraud=False,
+            timestamp=normal_time,
         )
 
         # Impossible transaction happening almost instantly in Tokyo/Paris/etc.
         fraud_device = Device(str(uuid.uuid4()), "Mobile", f"203.0.113.{random.randint(1, 254)}")
-        tx2 = Transaction(
-            transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
-            timestamp=timestamp.isoformat(),
-            customer_id=customer.customer_id,
-            merchant_id=merchant.merchant_id,
-            merchant_name=merchant.merchant_name,
-            merchant_category=merchant.category,
+        tx2 = build_transaction(
+            customer=customer,
+            merchant=merchant,
             amount=round(random.uniform(merchant.min_price, merchant.max_price * 0.8), 2),
             currency=config.get_currency_for_country(fraud_country),
             country=fraud_country,
             city=merchant.city,
             payment_method=customer.preferred_payment_method,
-            device=fraud_device.device_type,
+            device_type=fraud_device.device_type,
             ip_address=fraud_device.ip_address,
-            transaction_status="APPROVED",
+            status="APPROVED",
             is_fraud=True,
+            timestamp=timestamp,
         )
 
         # Update customer state to make future sequence logical
-        customer.last_transaction_timestamp = timestamp
         customer.last_transaction_country = fraud_country
         customer.last_transaction_city = merchant.city
 
@@ -249,27 +273,23 @@ class VelocityFraudStrategy(FraudStrategy):
             amount = round(random.uniform(1.0, 15.0), 2)  # small amounts
             current_time += timedelta(seconds=random.randint(2, 6))
 
-            tx = Transaction(
-                transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
-                timestamp=current_time.isoformat(),
-                customer_id=customer.customer_id,
-                merchant_id=merchant.merchant_id,
-                merchant_name=merchant.merchant_name,
-                merchant_category=merchant.category,
+            tx = build_transaction(
+                customer=customer,
+                merchant=merchant,
                 amount=amount,
                 currency=config.get_currency_for_country(customer.country),
                 country=customer.country,
                 city=customer.city,
                 payment_method=customer.preferred_payment_method,
-                device=device.device_type,
+                device_type=device.device_type,
                 ip_address=device.ip_address,
-                transaction_status="APPROVED",
+                status="APPROVED",
                 is_fraud=True,
+                timestamp=current_time,
             )
             transactions.append(tx)
 
         # Record last one on customer
-        customer.last_transaction_timestamp = current_time
         customer.last_transaction_country = customer.country
         customer.last_transaction_city = customer.city
 
@@ -297,22 +317,19 @@ class UnknownDeviceFraudStrategy(FraudStrategy):
         unknown_device_type = random.choice(["Mobile", "Laptop", "Tablet"])
         unknown_ip = f"103.24.11.{random.randint(1, 254)}"
 
-        tx = Transaction(
-            transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
-            timestamp=timestamp.isoformat(),
-            customer_id=customer.customer_id,
-            merchant_id=merchant.merchant_id,
-            merchant_name=merchant.merchant_name,
-            merchant_category=merchant.category,
+        tx = build_transaction(
+            customer=customer,
+            merchant=merchant,
             amount=amount,
             currency=config.get_currency_for_country(customer.country),
             country=customer.country,
             city=customer.city,
             payment_method="Credit Card",
-            device=unknown_device_type,
+            device_type=unknown_device_type,
             ip_address=unknown_ip,
-            transaction_status="APPROVED",
+            status="APPROVED",
             is_fraud=True,
+            timestamp=timestamp,
         )
         return [tx]
 
@@ -340,22 +357,19 @@ class LateNightLargePurchaseStrategy(FraudStrategy):
 
         device = random.choice(customer.devices) if customer.devices else Device(str(uuid.uuid4()), "Mobile", "127.0.0.1")
 
-        tx = Transaction(
-            transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
-            timestamp=adjusted_timestamp.isoformat(),
-            customer_id=customer.customer_id,
-            merchant_id=merchant.merchant_id,
-            merchant_name=merchant.merchant_name,
-            merchant_category=merchant.category,
+        tx = build_transaction(
+            customer=customer,
+            merchant=merchant,
             amount=amount,
             currency=config.get_currency_for_country(customer.country),
             country=customer.country,
             city=customer.city,
             payment_method="Credit Card",
-            device=device.device_type,
+            device_type=device.device_type,
             ip_address=device.ip_address,
-            transaction_status="APPROVED",
+            status="APPROVED",
             is_fraud=True,
+            timestamp=adjusted_timestamp,
         )
         return [tx]
 
@@ -567,26 +581,22 @@ class TransactionGenerator:
         # 8. Status (98% APPROVED, 2% DECLINED due to insufficient balance)
         status = "APPROVED" if random.random() < 0.98 else "DECLINED"
 
-        tx = Transaction(
-            transaction_id=f"TX-{uuid.uuid4().hex[:12].upper()}",
-            timestamp=timestamp.isoformat(),
-            customer_id=customer.customer_id,
-            merchant_id=merchant.merchant_id,
-            merchant_name=merchant.merchant_name,
-            merchant_category=merchant.category,
+        tx = build_transaction(
+            customer=customer,
+            merchant=merchant,
             amount=amount,
             currency=currency,
             country=country,
             city=city,
             payment_method=customer.preferred_payment_method,
-            device=device_type,
+            device_type=device_type,
             ip_address=ip_address,
-            transaction_status=status,
+            status=status,
             is_fraud=False,
+            timestamp=timestamp,
         )
 
         # Update customer last transaction state
-        customer.last_transaction_timestamp = timestamp
         customer.last_transaction_country = country
         customer.last_transaction_city = city
 
